@@ -1,20 +1,18 @@
-# Open-Meteo Weather Data Pipeline (MVP)
+# FireFusion Data Engineering MVP
 
-This pipeline fetches and processes weather data from Open-Meteo API.
+This folder contains a basic MVP data pipeline for FireFusion using Open-Meteo weather data.
 
-## Steps
-1. Fetch hourly weather data
-2. Store raw data as CSV
-3. Clean and preprocess data
-4. Generate cleaned CSV
+## Pipeline
+Open-Meteo API → ingestion script → raw CSV → cleaning script → cleaned CSV → validation → processed storage
 
 ## Files
-- fetch_open_meteo.py → fetches data
-- clean_open_meteo.py → cleans data
-
-## Output
-- melbourne_weather_raw.csv
-- melbourne_weather_cleaned.csv
+- scripts/fetch_open_meteo.py
+- scripts/clean_open_meteo.py
+- data/melbourne_weather_raw.csv
+- data/melbourne_weather_cleaned.csv
+- scripts/validate_open_meteo.py
+- scripts/store_processed_data.py
+- processed/weather_data_final.csv
 
 ## Purpose
-This pipeline is part of FireFusion MVP to support weather-based fire prediction models.
+To test weather data ingestion and preprocessing for the FireFusion MVP pipeline.
