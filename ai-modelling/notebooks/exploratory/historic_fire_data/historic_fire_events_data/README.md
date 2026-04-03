@@ -24,6 +24,7 @@ Input data can be downloaded from: https://digital.atlas.gov.au/datasets/524e296
 ## Outputs
 
 - `historic_fire_extents_data.csv` – Cleaned and feature-engineered Victorian bushfire dataset
+- `historic_fire_extents_data.geojson` – Cleaned and feature-engineered Victorian bushfire dataset
 
 ## Output Features
 
@@ -160,7 +161,7 @@ The lack of extinguish dates in particular greatly limits the usefulness as a da
 - `small` (<10 ha): Minor fires, often contained quickly
 - `medium` (10–100 ha): Moderate fires requiring intervention
 - `large` (100–1000 ha): Major fires with significant impact
-- `mega` (≥1000 ha): Catastrophic fires (rare; includes largest Black Summer events)
+- `mega` (≥1000 ha): Catastrophic fires (includes largest Black Summer events)
 
 ### Compactness Interpretation
 - Circle has compactness = 1 (most compact)
