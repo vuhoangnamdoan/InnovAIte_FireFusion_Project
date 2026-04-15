@@ -27,6 +27,7 @@ services:
         condition: service_healthy 
     environment:
       BROKER_URL: amqp://guest:guest@broker:5672
+      PYTHONUNBUFFERED: 1
 
   aggregator-api: # api
     profiles: ["default", "aggregator"]
@@ -42,6 +43,7 @@ services:
     environment:
       RELATIONAL_DB_URL: postgresql://postgres:postgres@relational-db:5432/postgres
       BROKER_URL: amqp://guest:guest@broker:5672
+      PYTHONUNBUFFERED: 1
 
   relational-db: # relational database
     profiles: ["default", "aggregator"]
