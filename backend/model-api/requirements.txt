@@ -3,3 +3,7 @@ uvicorn[standard]
 scikit-learn
 joblib
 numpy
+aio_pika
+python-dotenv
+pydantic
+pydantic-settings

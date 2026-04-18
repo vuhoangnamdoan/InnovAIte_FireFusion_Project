@@ -1,0 +1,88 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": { "risk_factor": 5 },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [146.4300, -36.7500],
+          [146.3500, -36.8800],
+          [146.5500, -36.9200],
+          [146.4300, -36.7500]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "risk_factor": 3 },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [146.8000, -36.6000],
+          [146.7000, -36.7500],
+          [146.9200, -36.8000],
+          [147.0000, -36.6800],
+          [146.8000, -36.6000]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "risk_factor": 1 },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [147.1500, -36.5000],
+          [147.0500, -36.6200],
+          [147.2500, -36.6800],
+          [147.3500, -36.5500],
+          [147.1500, -36.5000]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "risk_factor": 4 },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [146.2000, -37.0000],
+          [146.1000, -37.1500],
+          [146.3200, -37.2000],
+          [146.4000, -37.0800],
+          [146.2000, -37.0000]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "risk_factor": 2 },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [147.4000, -36.8000],
+          [147.3000, -36.9500],
+          [147.5500, -37.0000],
+          [147.6000, -36.8500],
+          [147.4000, -36.8000]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "risk_factor": 5 },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [146.6000, -36.8500],
+          [146.5200, -36.9800],
+          [146.7200, -37.0200],
+          [146.7800, -36.9000],
+          [146.6000, -36.8500]
+        ]]
+      }
+    }
+  ]
+}

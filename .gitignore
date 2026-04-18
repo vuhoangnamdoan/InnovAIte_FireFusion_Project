@@ -20,3 +20,5 @@ venv/
 # Data files (large)
 *.geojson
 *.csv
+
+.vscode/
