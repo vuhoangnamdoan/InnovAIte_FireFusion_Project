@@ -1,4 +1,4 @@
-# ERA5-Land Dataset Docummentation
+# ERA5-Land Dataset Documentation
 ## Project
 FireFusion - Bushfire Forecasting Model
 
