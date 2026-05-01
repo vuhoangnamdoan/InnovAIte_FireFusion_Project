@@ -9,9 +9,7 @@ export default function Layout({ children, title = "Dashboard" }) {
 
       <main className="main">
         <Topbar title={title} />
-
         {children}
-
         <Footer />
       </main>
     </div>
