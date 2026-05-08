@@ -1,24 +1,26 @@
 """
-End-to-end NLP pipeline for narrative clustering.
+End-to-end NLP pipeline for narrative clustering and misinformation detection.
 
-This module orchestrates the workflow: load/prepare posts, call the LLM client,
-run narrative clustering, and return/save structured cluster outputs for
-downstream analysis and monitoring.
-""""""
-Cluster social media posts into bushfire misinformation narratives.
+This module orchestrates:
+1) narrative clustering,
+2) affective index construction,
+3) retrieval of labeled few-shot examples,
+4) instruction construction,
+5) LLM-based detection output parsing.
 """
-
-from __future__ import annotations
-
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
-
+import tempfile
 from .llm_client import LLMClient,  LLMConfig, render_prompt
+from .indexconstruct_post import IndexConstructorPost, IndexConstructConfig
+from .retrieval_post import RetrieverPost, RetrievalConfig
+from .construct_instructs_post import InferenceInstructionBuilderPost, ConstructInstructsConfig
 from typing import Literal
 from pydantic import BaseModel, Field
 import json
 from pathlib import Path
+import pandas as pd
 
 # ---------- Input schemas ----------
 class InputPost(BaseModel):
@@ -194,9 +196,181 @@ class NarrativeClusterer:
         return self._validate_output(result, posts_for_prompt)
 
 
-# ---------- Narrative Clustering ----------
-def main() -> None:
-    # Adjust path if running from a different working directory.
+# ---------- Misinformation Detection and Flag ----------
+DETECTION_PROMPT_TEMPLATE = """
+You are a wildfire misinformation detector.
+
+Return ONLY valid JSON:
+{
+  "label": "fake|legit",
+  "risk_score": 0.0,
+  "severity": "CRITICAL|HIGH|MEDIUM|LOW",
+  "rationale": "short reason"
+}
+
+Rules:
+- label must be exactly "fake" or "legit" (lowercase)
+- risk_score must be in [0,1] and means probability the post is fake
+- severity is impact if the claim is false:
+  - CRITICAL: immediate life-safety harm (evacuation/shelter/route directives, emergency scams)
+  - HIGH: materially harmful misinformation affecting decisions/trust
+  - MEDIUM: moderate confusion/speculation
+  - LOW: low operational impact
+""".strip()
+
+def _parse_detection_output(output: dict[str, Any], post_id: str) -> dict[str, Any]:
+    label = str(output.get("label", "fake")).strip().lower()
+    if label not in {"fake", "legit"}:
+        label = "fake"
+        parse_failed = True
+    else:
+        parse_failed = False
+
+    try:
+        risk = float(output.get("risk_score", 0.8 if label == "fake" else 0.2))
+    except Exception:
+        risk = 0.8
+        parse_failed = True
+
+    risk = max(0.0, min(1.0, risk))
+
+    sev = str(output.get("severity", "HIGH" if label == "fake" else "LOW")).upper()
+    if sev not in {"CRITICAL", "HIGH", "MEDIUM", "LOW"}:
+        sev = "HIGH" if label == "fake" else "LOW"
+        parse_failed = True
+
+    review = bool(output.get("needs_human_review", False))
+    if parse_failed or label == "fake" or risk >= 0.8 or sev in {"CRITICAL", "HIGH"}:
+        review = True
+
+    return {
+        "post_id": post_id,
+        "label": label,
+        "risk_score": risk,
+        "severity": sev,
+        "needs_human_review": review,
+        "rationale": str(output.get("rationale", "")),
+    }
+
+def run_full_pipeline_with_detection(raw_posts: list[dict[str, Any]], client: LLMClient) -> dict[str, Any]:
+    """
+    End-to-end pipeline:
+      A) narrative clustering
+      B) index construction (target + source)
+      C) retrieval
+      D) instruction construction
+      E) LLM detection
+
+    Uses per-request temporary storage for intermediate artifacts so incoming
+    payloads are not persisted in a fixed project folder.
+    """
+    if not isinstance(raw_posts, list) or len(raw_posts) == 0:
+        raise ValueError("raw_posts must be a non-empty list of post dicts.")
+
+    # Step A: narrative clustering
+    clusterer = NarrativeClusterer(
+        client=client,
+        prompt_template=CLUSTER_PROMPT_TEMPLATE,
+        config=ClusterConfig(strict_json=True, enforce_all_posts_used_once=True),
+    )
+    narratives = clusterer.run(raw_posts)
+
+    project_root = Path(__file__).resolve().parents[4]
+    source_csv_path = (
+        project_root
+        / "ai-modelling"
+        / "src"
+        / "models"
+        / "misinformation"
+        / "datasets"
+        / "AMTCele.csv"
+    )
+    if not source_csv_path.exists():
+        raise FileNotFoundError(f"Source dataset not found: {source_csv_path}")
+
+    indexer = IndexConstructorPost(IndexConstructConfig())
+
+    # Use temp dir to avoid persisting per-request inputs/artifacts
+    with tempfile.TemporaryDirectory(prefix="misinfo_pipeline_") as tmp_dir:
+        pipeline_work_dir = Path(tmp_dir)
+
+        # Persist input only inside temp workspace for index stage
+        posts_json_path = pipeline_work_dir / "posts_input.json"
+        posts_json_path.write_text(
+            json.dumps(raw_posts, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+        # Step B: target/source indexing
+        target_idx = indexer.run(
+            input_path=str(posts_json_path),
+            out_dir=str(pipeline_work_dir / "index_target"),
+            data_name="TARGET",
+            build_embeddings_for="Vreg",
+        )
+        source_idx = indexer.run(
+            input_path=str(source_csv_path),
+            out_dir=str(pipeline_work_dir / "index_source"),
+            data_name="SOURCE",
+            build_embeddings_for="Vreg",
+        )
+
+        # Step C: retrieval
+        retriever = RetrieverPost(
+            RetrievalConfig(top_k=4, min_score=0.2, text_col="text", label_col="label", id_col="id")
+        )
+        retrieved_payload = retriever.run(
+            target_csv=target_idx["posts_csv"],
+            source_csv=source_idx["posts_csv"],
+            target_emb_path=target_idx["embedding_pth"],
+            source_emb_path=source_idx["embedding_pth"],
+        )
+
+        # Step D: instruction construction
+        target_posts_df = pd.read_csv(target_idx["posts_csv"])
+        builder = InferenceInstructionBuilderPost(
+            ConstructInstructsConfig(
+                task_prompt="Determine whether the target text is fake or legit using the retrieved examples.",
+                include_affective_info=True,
+                top_k=4,
+            )
+        )
+        instructions = builder.run(target_posts_df, retrieved_payload)
+
+        # Step E: detection
+        detections: list[dict[str, Any]] = []
+        for rec in instructions:
+            prompt = rec["instruction"] + "\n\n" + DETECTION_PROMPT_TEMPLATE
+            try:
+                out = client.generate_json(prompt)
+                detections.append(_parse_detection_output(out, rec["post_id"]))
+            except Exception:
+                detections.append(
+                    {
+                        "post_id": rec["post_id"],
+                        "label": "fake",
+                        "risk_score": 0.8,
+                        "severity": "HIGH",
+                        "needs_human_review": True,
+                        "rationale": "LLM output parsing failed; conservative fallback",
+                    }
+                )
+
+        return {
+            "narratives": narratives["narratives"],
+            "detections": detections,
+            "artifacts": {
+                # Keep useful metadata; paths are temp and ephemeral by design
+                "index_target": target_idx,
+                "index_source": source_idx,
+                "retrieval_count": len(retrieved_payload),
+                "instruction_count": len(instructions),
+                "artifact_storage": "temporary_directory",
+            },
+        }
+
+# ---------- NLP Pipeline (Narrative Clustering + Misinformation Detection) ----------
+def main() -> dict[str, Any]:
     project_root = Path(__file__).resolve().parents[4]
     posts_path = project_root / "posts.json"
 
@@ -204,33 +378,27 @@ def main() -> None:
 
     client = LLMClient(
         LLMConfig(
-            provider="gemini",          # or "openai"
+            provider="gemini",
             model="gemini-3-flash-preview",
             temperature=0.2,
             max_retries=3,
         )
     )
 
-    clusterer = NarrativeClusterer(
-        client=client,
-        prompt_template=CLUSTER_PROMPT_TEMPLATE,   # rename to CLUSTER_PROMPT_TEMPLATE if you can
-        config=ClusterConfig(
-            strict_json=True,
-            enforce_all_posts_used_once=True,
-        ),
-    )
+    result = run_full_pipeline_with_detection(raw_posts, client)
 
-    result = clusterer.run(raw_posts)
+    # save full artifact
+    out_dir = project_root / "ai-modelling" / "results"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_file = out_dir / "misinformation_pipeline_output.json"
+    out_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    # Small test output
-    narratives = result.get("narratives", [])
-    print(f"Generated narratives: {len(narratives)}")
-    for n in narratives:
-        print(
-            f"- {n['narrative_id']} | {n['severity']} | "
-            f"posts={n['post_count']} | "
-            f"{n['timestamp_earliest']} -> {n['timestamp_latest']}"
-        )
+    # short summary logs
+    print(f"Narratives: {len(result.get('narratives', []))}")
+    print(f"Detections: {len(result.get('detections', []))}")
+    print(f"Saved: {out_file}")
+
+    return result
 
 if __name__ == "__main__":
-    main()
+    _ = main()
