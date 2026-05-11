@@ -11,6 +11,24 @@ from shapely.geometry import box
 from scipy.spatial import cKDTree
 import os
 
+def load_victoria_boundary(boundary_geojson_path):
+    """Load Victoria boundary from exported GEE GeoJSON.
+    
+    Parameters:
+        boundary_geojson_path (str): Path to victoria_boundary_fao_gaul_2015.geojson
+    
+    Returns:
+        victoria_gdf (GeoDataFrame): Victoria boundary polygon in EPSG:4326
+    """
+    victoria_gdf = gpd.read_file(boundary_geojson_path)
+    
+    if victoria_gdf.crs != 'EPSG:4326':
+        victoria_gdf = victoria_gdf.to_crs('EPSG:4326')
+    
+    print(f"Loaded Victoria boundary from {boundary_geojson_path}")
+    
+    return victoria_gdf
+
 
 def load_and_combine_data(n20_path, n_path, modis_path):
     """Load raw satellite CSV exports and combine into single dataframe with unified confidence values.
@@ -42,66 +60,85 @@ def load_and_combine_data(n20_path, n_path, modis_path):
     m_df["confidence"] = m_df["confidence"].apply(map_confidence)
     
     df = pd.concat([n20_df, n_df, m_df], ignore_index=True)
-    return df.sort_values(["acq_date", "acq_time"])
+    
+    return df
 
 
-def filter_to_victoria(df):
-    """Apply bounding box filter to isolate Victorian detections.
+def filter_to_victoria(df, victoria_boundary_gdf):
+    """Apply Victoria boundary filter to isolate Victorian detections.
     
     Parameters:
         df (DataFrame): Raw satellite detections with latitude, longitude columns
+        victoria_boundary_gdf (GeoDataFrame): Victoria boundary polygon
     
     Returns:
-        vic_df (DataFrame): Filtered detections within Victoria bounding box [lat -39.2 to -34.0, lon 140.9 to 150.0]; sorted by acq_date, acq_time
+        vic_df (DataFrame): Filtered detections within Victoria boundary polygon; sorted by acq_date, acq_time
     """
-    vic_df = df[(df["latitude"] >= -39.2) &
-                (df["latitude"] <= -34.0) &
-                (df["longitude"] >= 140.9) &
-                (df["longitude"] <= 150.0)
-            ].copy()
+    # Create GeoDataFrame from detections
+    gdf = gpd.GeoDataFrame(
+        df,
+        geometry=gpd.points_from_xy(df.longitude, df.latitude),
+        crs="EPSG:4326"
+    )
+    
+    # Clip to Victoria boundary
+    vic_gdf = gpd.clip(gdf, victoria_boundary_gdf)
+    
+    # Convert back to DataFrame
+    vic_df = pd.DataFrame(vic_gdf.drop(columns='geometry'))
+    
     return vic_df.sort_values(["acq_date", "acq_time"], ascending=True)
 
-
-def grid_cells(vic_df):
-    """Project to local CRS, snap to 1km² cells, aggregate per cell per satellite pass.
+def grid_cells_gee_aligned(vic_df, victoria_boundary_gdf, grid_scale=5000):
+    """Project to local CRS, snap to 5km² cells, clip with Victoria geometry, aggregate per cell per satellite pass.
     
     Parameters:
         vic_df (DataFrame): Victorian detections with latitude, longitude, confidence, brightness, bright_t31, frp, acq_date, acq_time, daynight, satellite
+        victoria_boundary_gdf: GeoDataFrame containing the boundaries for Victoria
     
     Returns:
         grid_gdf (GeoDataFrame): Gridded aggregates with columns [cell_x, cell_y, acq_date, daynight, satellite, brightness (max), bright_t31 (max), frp_peak (max), frp_cumulative (sum), confidence (max), 
             acq_time (max), geometry (1km² cell as Polygon), longitude, latitude]; CRS EPSG:4326; sorted by acq_date, daynight, satellite; one row per unique (cell_x, cell_y, acq_date, daynight, satellite) group
     """
+    
+    # Build Vic GeoDataFrame
     gdf = gpd.GeoDataFrame(
         vic_df,
         geometry=gpd.points_from_xy(vic_df.longitude, vic_df.latitude),
         crs="EPSG:4326"
     )
+    gdf = gdf.to_crs(epsg=3857)
     
-    # Project to meters
-    gdf = gdf.to_crs(epsg=7855)
+    victoria_3857 = victoria_boundary_gdf.to_crs(epsg=3857)
+    xmin, ymin, xmax, ymax = victoria_3857.total_bounds
     
-    # Grid setup
-    cell_size = 1000
-    xmin, ymin, xmax, ymax = gdf.total_bounds
-    xmin = (xmin // cell_size) * cell_size
-    ymin = (ymin // cell_size) * cell_size
+    # Snap to grid intervals
+    xmin_grid = (xmin // grid_scale) * grid_scale
+    ymin_grid = (ymin // grid_scale) * grid_scale
+    xmax_grid = ((xmax // grid_scale) + 1) * grid_scale
+    ymax_grid = ((ymax // grid_scale) + 1) * grid_scale
     
-    # Assign cells
-    gdf['cell_x'] = ((gdf.geometry.x - xmin) // cell_size).astype(int)
-    gdf['cell_y'] = ((gdf.geometry.y - ymin) // cell_size).astype(int)
+    gdf['cell_x'] = ((gdf.geometry.x - xmin_grid) // grid_scale).astype(int)
+    gdf['cell_y'] = ((gdf.geometry.y - ymin_grid) // grid_scale).astype(int)
     
-    # Map confidence to numeric
+    # Build grid_id
+    gdf['grid_id'] = gdf.apply(
+        lambda row: int(row.cell_y * 1000000 + row.cell_x),
+        axis=1
+    )
+    
+    # Map confidence
     conf_map = {"l": 1, "n": 2, "h": 3}
     gdf["confidence"] = gdf["confidence"].map(conf_map)
     
-    # Aggregate per cell per pass
-    grid_df = gdf.groupby(["cell_x", "cell_y", "acq_date", "daynight", "satellite"]).agg(
+    # Aggregate within grid cells
+    grid_df = gdf.groupby(
+        ["grid_id", "cell_x", "cell_y", "acq_date", "daynight", "satellite"]
+    ).agg(
         brightness=('brightness', 'max'),
         bright_t31=("bright_t31", "max"),
         frp_peak=('frp', 'max'),
         frp_cumulative=('frp', 'sum'),
-        geometry=('geometry', 'first'),
         confidence=('confidence', 'max'),
         acq_time=('acq_time', 'max')
     ).reset_index()
@@ -109,25 +146,35 @@ def grid_cells(vic_df):
     # Build cell geometry
     grid_df['geometry'] = grid_df.apply(
         lambda row: box(
-            xmin + row.cell_x * cell_size,
-            ymin + row.cell_y * cell_size,
-            xmin + (row.cell_x + 1) * cell_size,
-            ymin + (row.cell_y + 1) * cell_size
+            xmin_grid + row.cell_x * grid_scale,
+            ymin_grid + row.cell_y * grid_scale,
+            xmin_grid + (row.cell_x + 1) * grid_scale,
+            ymin_grid + (row.cell_y + 1) * grid_scale
         ),
+        
         axis=1
     )
     
-    grid_gdf = gpd.GeoDataFrame(grid_df, geometry='geometry', crs=gdf.crs)
+    grid_gdf = gpd.GeoDataFrame(grid_df, geometry='geometry', crs=3857)
+    
+    # Clip to Victoria boundary, only keep cells in Victoria
+    print(f"Clipping grid to Victoria boundary... -- expensive operation, may take several minute")
+    
+    grid_gdf = gpd.clip(grid_gdf, victoria_3857)
+    
+    print(f"Clipped to Victoria boundary")
+    
     grid_gdf = grid_gdf.to_crs(epsg=4326)
     
-    # Rebuild centroids
-    grid_gdf['centroid'] = grid_gdf.geometry.centroid
-    centroids_latlon = grid_gdf.set_geometry('centroid').to_crs(epsg=4326)
-    grid_gdf['longitude'] = centroids_latlon.geometry.x
-    grid_gdf['latitude'] = centroids_latlon.geometry.y
-    grid_gdf = grid_gdf.drop(columns='centroid')
+    # Build centroid longitudes/latitudes
+    grid_gdf['longitude'] = grid_gdf.geometry.centroid.x
+    grid_gdf['latitude'] = grid_gdf.geometry.centroid.y
     
-    return grid_gdf.sort_values(by=['acq_date', 'daynight', 'satellite']).reset_index(drop=True)
+    grid_gdf = grid_gdf.sort_values(
+        by=['acq_date', 'daynight', 'satellite']
+    ).reset_index(drop=True)
+    
+    return grid_gdf
 
 
 def engineer_temporal_features(grid_gdf):
@@ -332,6 +379,8 @@ def main(output_csv="satellite_fire_data.csv", output_geojson="satellite_fire_da
     script_dir = os.path.dirname(os.path.abspath(__file__))
     data_dir = os.path.join(script_dir, "data")
     
+    boundary_geojson_path = os.path.join(data_dir, "victoria_boundary_fao_gaul_2015.geojson")
+    
     n20_path = os.path.join(data_dir, "fire_archive_J1V-C2_734127.csv")
     n_path = os.path.join(data_dir, "fire_archive_SV-C2_734128.csv")
     modis_path = os.path.join(data_dir, "fire_archive_M-C61_734126.csv")
@@ -339,17 +388,20 @@ def main(output_csv="satellite_fire_data.csv", output_geojson="satellite_fire_da
     output_csv = os.path.join(script_dir, output_csv)
     output_geojson = os.path.join(script_dir, output_geojson)
     
+    print("Loading Victoria boundary from GEE...")
+    victoria_boundary = load_victoria_boundary(boundary_geojson_path)
+    
     print("Loading satellite data...")
     df = load_and_combine_data(n20_path, n_path, modis_path)
-    print(f"  Loaded {len(df)} raw detections")
+    print(f"Loaded {len(df)} raw detections")
     
     print("Filtering to Victoria...")
-    vic_df = filter_to_victoria(df)
-    print(f"  Filtered to {len(vic_df)} Victorian detections")
+    vic_df = filter_to_victoria(df, victoria_boundary)
+    print(f"Filtered to {len(vic_df)} Victorian detections")
     
-    print("Gridding to 1km² cells...")
-    grid_gdf = grid_cells(vic_df)
-    print(f"  Created {len(grid_gdf)} gridded records")
+    print("Gridding to 5km² cells...")
+    grid_gdf = grid_cells_gee_aligned(vic_df, victoria_boundary, 5000)
+    print(f"Created {len(grid_gdf)} gridded records")
     
     print("Engineering temporal features...")
     grid_gdf = engineer_temporal_features(grid_gdf)

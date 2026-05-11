@@ -25,9 +25,11 @@ To use this script, ensure that the above outputs exist in there working folder.
 
 - `unified_historic_fire_dataset.geojson` – Final fire dataset with all computed metrics
 - `unified_historic_fire_dataset.csv` – Final fire dataset with all computed metrics
+- `satellite_detections_within_fires.geojson` - Final satellite detections dataset filtered by confirmed detections within fire events
+- `satellite_detections_within_fires.csv` - Final satellite detections dataset filtered by confirmed detections within fire events
 
 ## Output Features
-
+### Unified Dataset
 | Feature | Type | Description |
 |---------|------|-------------|
 | **fire_id** | str | Unique fire identifier; negative values are synthetic IDs for fires with no official ids Unique fire identifier; negative values are synthetic IDs for fires with no official idsUnique fire identifier; negative values are synthetic IDs for fires with no official idsUnique fire identifier; negative values are synthetic IDs for fires with no official idsUnique fire identifier; negative values are synthetic IDs for fires with no official idsUnique fire identifier; negative values are synthetic IDs for fires with no official ids |
@@ -46,6 +48,31 @@ To use this script, ensure that the above outputs exist in there working folder.
 | **compactness** | float | Shape metric (perimeter² / area); low compactness indicates irregular spread |
 | **log_area** | float | Log-transformed area (log₁ₚ(area_ha)); reduces skew for analysis |
 | **geometry** | geometry | Polygon boundary (WKT) |
+
+### Filtered Satellite Detections
+| Feature | Type | Description |
+|---------|------|-------------|
+| **cell_x** | int | Grid cell x-coordinate |
+| **cell_y** | int | Grid cell y-coordinate |
+| **datetime** | datetime | Acquisition date of detection |
+| **daynight** | int | 0 = AM, 1 = PM |
+| **confidence** | int | Confidence that detection is a fire: `1` = low, `2` = nominal, `3` = high |
+| **is_burning** | int | Binary flag; `1` = currently burning, `0` = not currently burning |
+| **brightness** | float | Max detected brightness temperature (Kelvin) in cell |
+| **bright_t31** | float | Max 11-micron brightness temperature (Kelvin) in cell |
+| **frp_peak** | float | Maximum Fire Radiative Power (MW) in cell. FRP provides a measure of fire severity |
+| **frp_cumulative** | float | Sum of FRP across all detections in cell (MW) |
+| **burning_neighbors_r1** | int | Count of cells burning in radius 1-cell neighbourhood in the same timestep (0-8) |
+| **burning_neighbors_r2** | int | Count of cells burning in radius 2-cell neighbourhood in the same timestep (0-24) |
+| **is_burning_prev** | int | Binary flag; `1` if cell detected fire at the previous timestep |
+| **frp_prev** | float | Peak FRP in this cell in the previous timestep |
+| **burning_neighbors_prev_r1** | int | Count of cells burning in radius 1-cell neighbourhood in the previous timestep (0-8) |
+| **burning_neighbors_prev_r2** | int | Count of cells burning in radius 2-cell neighbourhood in the previous timestep (0-24) |
+| **is_burning_next** | int | Binary flag; `1` if cell detected fire at next pass (prediction target) |
+| **frp_next** | float | Peak FRP at this cell in next timestep (prediction target) |
+| **longitude** | float | Cell centroid longitude (EPSG:4326) |
+| **latitude** | float | Cell centroid latitude (EPSG:4326) |
+| **geometry** | geometry | Cell polygon boundary |
 
 ## Detection Status Logic
 
@@ -118,11 +145,14 @@ To use this script, ensure that the above outputs exist in there working folder.
     - No duration imputation applied
     - Likely fast-moving grass fires, handling should be explored further
 
-### 11. Final Output
+### 11. Unified Final Output
 - Enforces column ordering for consistency
 - Sorts by ignition_date and fire_id (groups same-date fires together)
 - Ensures WGS84 lat/lon (EPSG:4326) for compatibility with basemaps and Earth Engine
 - Exports to CSV
+
+### 12. Filtered Satellite Detections Output
+- Filters original satellite dataset to only contain detections confirmed as bushfires by the historic fire events
 
 ## Key Parameters
 
@@ -142,7 +172,6 @@ As a dataset, this provides the following information:
 - The severity (FRP) of the fire event
 
 These features provide essential information for mapping historical bushfire events and behaviour in Victoria. As a geodataframe, it is also ready for mapping with Google Earth Engine datasets through multipolygon geometry.
-
 
 ## Notes
 ### Limitations

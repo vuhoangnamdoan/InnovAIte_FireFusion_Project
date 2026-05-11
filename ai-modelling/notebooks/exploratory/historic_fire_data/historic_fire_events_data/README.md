@@ -5,7 +5,7 @@ Processing pipeline for the National Historical Bushfire Extents dataset, filter
 
 ## Overview
 
-This notebook processes the National Historical Bushfire Extents geodatabase to:
+This script processes the National Historical Bushfire Extents geodatabase to:
 - Load and filter bushfire extent polygons to Victorian records
 - Quality check and clean the dataset (remove null columns, zero-area fires)
 - Isolate the 2018–2022 period (including Black Summer 2019–2020)
@@ -19,7 +19,8 @@ The final dataset provides ground-truth fire boundaries with shape characteristi
 
 - `BushfireEvents.gdb/National_Historical_Bushfire_Extents_v4` – National database of historic bushfire extent polygons (Geospatial Database, GeoDatabase format)
 
-Input data can be downloaded from: https://digital.atlas.gov.au/datasets/524e2962bd8b4968b8df9f9774345926/about
+Input data can be downloaded from: https://digital.atlas.gov.au/datasets/524e2962bd8b4968b8df9f9774345926/about. 
+To use the script, place the downloaded data into the data folder inside `historic_fire_events_dataset`.
 
 ## Outputs
 
@@ -69,28 +70,7 @@ Derives new features from geometry and ignition date:
 - **Log Area**: Log-transformed area to reduce right skew for statistical analysis
 - **Size Class**: Categorical binning of area into four classes for summary statistics
 
-### 5. Exploratory Analysis
-Investigates fire characteristics and patterns:
-
-**5.1 Fire Type Breakdown**
-- Identifies that dataset contains large majority of prescribed burns with smaller bushfire population
-- Filters to bushfire records only for analysis (n ≈ 1310)
-- Notes that bushfires have significantly higher mean and std dev area than prescribed burns
-
-**5.2 Area Distribution**
-- Visualizes log-transformed area histogram
-- Identifies massive right skew: large majority of bushfires are small, with very few being enormous
-
-**5.3 Seasonal Patterns**
-- Aggregates fires by season: count, total area, mean area
-- Finds bushfires occur significantly more often in summer with much larger median area
-- Caution: Dataset includes Black Summer 2019–2020, which may exaggerate seasonal effect
-
-**5.4 Compactness vs Size**
-- Scatter plot of log area (x-axis) against compactness (y-axis)
-- Finds inverse relationship: larger fires tend to have lower compactness, suggesting more irregular spread in large events
-
-### 6. Export
+### 5. Export
 - Enforces column ordering for consistency
 - Writes final dataset to CSV with geometry in WKT format
 

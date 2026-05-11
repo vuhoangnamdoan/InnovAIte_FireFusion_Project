@@ -306,8 +306,110 @@ def finalize_and_export(bushfire_gdf, output_csv, output_geojson):
     
     return bushfire_gdf
 
+def filter_detections_within_fires(viirs_gdf, bushfire_gdf, output_csv, output_geojson):
+    """Filter satellite detections to those within fire extent polygons and aggregate by cell/date/daynight. Aggregates multiple detections per cell per timestep.
+    
+    Parameters:
+        viirs_gdf (GeoDataFrame): Original satellite detections with all columns intact
+        bushfire_gdf (GeoDataFrame): Bushfire polygons with fire_id and geometry
+        output_csv (str): Output file path for CSV export
+        output_geojson (str): Output file path for GeoJSON export
+    
+    Returns:
+        aggregated_detections (GeoDataFrame): Aggregated detections within fire polygons
+        writes CSV and GeoJSON files to disk
+    """
+    
+    # Spatial join
+    filtered_detections = gpd.sjoin(
+        viirs_gdf,
+        bushfire_gdf[["fire_id", "geometry"]],
+        how="inner",
+        predicate="intersects"
+    )
+    
+    filtered_detections = filtered_detections.drop(columns=["index_right"], errors="ignore")
+    filtered_detections = filtered_detections.drop_duplicates(subset=viirs_gdf.columns, keep="first")
+    
+    filtered_detections["date"] = pd.to_datetime(filtered_detections["datetime"]).dt.date
+    
+    # Define binary and contiuous columns
+    binary_cols = [
+        "confidence", "is_burning", "burning_neighbors_r1", "burning_neighbors_r2",
+        "is_burning_prev", "is_burning_next"
+    ]
+    
+    frp_cols = [
+        "brightness", "bright_t31", "frp_peak", "frp_cumulative",
+        "frp_prev", "frp_next"
+    ]
+    
+    first_value_cols = ["satellite", "time_since_prev_pass", "longitude", "latitude"]
+    
+    agg_dict = {}
+    
+    # Aggregate across features
+    for col in binary_cols:
+        if col in filtered_detections.columns:
+            agg_dict[col] = "max"
+    
+    for col in frp_cols:
+        if col in filtered_detections.columns:
+            agg_dict[col] = "max"
+    
+    for col in first_value_cols:
+        if col in filtered_detections.columns:
+            agg_dict[col] = "first"
+    
+    if "geometry" in filtered_detections.columns:
+        agg_dict["geometry"] = "first"
+    
+    # Aggregate by cell_x, cell_y, date, daynight
+    aggregated_detections = filtered_detections.groupby(
+        ["cell_x", "cell_y", "date", "daynight"],
+        as_index=False
+    ).agg(agg_dict)
+    
+    aggregated_detections["datetime"] = aggregated_detections["date"]
+    
+    # Drop the intermediate date column
+    aggregated_detections = aggregated_detections.drop(columns=["date"])
+    
+    # Reorder columns to match original format
+    original_cols = list(viirs_gdf.columns)
+    new_cols = [col for col in original_cols if col in aggregated_detections.columns]
+    
+    # Add any remaining columns
+    remaining_cols = [col for col in aggregated_detections.columns if col not in new_cols]
+    final_col_order = new_cols + remaining_cols
+    
+    aggregated_detections = aggregated_detections[final_col_order]
+    
+    # Convert to GeoDataFrame
+    aggregated_detections = gpd.GeoDataFrame(
+        aggregated_detections,
+        geometry="geometry",
+        crs="EPSG:4326"
+    )
+    
+    # Sort by datetime
+    aggregated_detections = aggregated_detections.sort_values("datetime", ascending=True)
+    
+    aggregated_detections = aggregated_detections.drop(columns=['satellite', 'time_since_prev_pass'])
+    
+    # Export CSV and GeoJSON
+    aggregated_csv = aggregated_detections.copy()
+    aggregated_csv["geometry"] = aggregated_csv["geometry"].astype(str)
+    aggregated_csv.to_csv(output_csv, index=False)
 
-def main(output_csv="unified_historic_fire_dataset.csv", output_geojson="unified_historic_fire_dataset.geojson"):
+    aggregated_detections.to_file(output_geojson, driver="GeoJSON")
+    
+    print(f"Exported csv to {output_csv}")
+    print(f"Exported GeoJSON to {output_geojson}")
+    
+    return aggregated_detections
+
+def main(output_csv="unified_historic_fire_dataset.csv", output_geojson="unified_historic_fire_dataset.geojson", detections_csv="satellite_detections_within_fires.csv", detections_geojson="satellite_detections_within_fires.geojson"):
     """Execute complete pipeline: load data → spatial join → temporal filter → estimate extinguish → calculate duration → extract FRP → classify detections → handle undetected → export.
     
     Parameters:
@@ -329,6 +431,8 @@ def main(output_csv="unified_historic_fire_dataset.csv", output_geojson="unified
     # Output paths
     output_csv = os.path.join(script_dir, output_csv)
     output_geojson = os.path.join(script_dir, output_geojson)
+    detections_csv = os.path.join(script_dir, detections_csv)
+    detections_geojson = os.path.join(script_dir, detections_geojson)
     
     print("Loading satellite and bushfire datasets...")
     viirs_gdf, bushfire_gdf = load_data(satellite_path, bushfire_path)
@@ -362,10 +466,13 @@ def main(output_csv="unified_historic_fire_dataset.csv", output_geojson="unified
     print("Handling undetected fires...")
     bushfire_gdf = handle_undetected_fires(bushfire_gdf)
     
-    print("Finalizing and exporting...")
+    print("Finalizing and exporting ...")
     bushfire_gdf = finalize_and_export(bushfire_gdf, output_csv, output_geojson)
     
-    return bushfire_gdf
+    print("Detection-level dataset")
+    detections_gdf = filter_detections_within_fires(viirs_gdf, bushfire_gdf, detections_csv, detections_geojson)
+    
+    return bushfire_gdf, detections_gdf
 
 
 if __name__ == "__main__":

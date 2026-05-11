@@ -9,7 +9,8 @@ Produces a gridded, feature-engineered dataset for ML modelling or further engin
 This notebook processes raw VIIRS and MODIS satellite thermal detections to:
 - Combine multi-satellite feeds (VIIRS N20, VIIRS SNPP, MODIS Aqua, MODIS Terra) into a unified dataset
 - Filter detections to Victoria using latitude/longitude bounding box and spatial bounds
-- Map detections to a grid with 1 km² cells and aggregate per satellite pass
+- Map detections to a grid with 5 km² cells and aggregate per satellite pass
+- Clips grid to only include those with Victoria boundary
 - Engineer temporal features (pass timing, time since previous pass)
 - Compute spatial neighbours at two radii (r=1, r=2 cells)
 - Generate targets for time-series prediction (next-timestep burn state and FRP)
@@ -22,8 +23,11 @@ The time period of the dataset can be easily expanded with larger raw NASA expor
 - `fire_archive_J1V-C2_734127.csv` – VIIRS N20 satellite detections (raw NASA export)
 - `fire_archive_SV-C2_734128.csv` – VIIRS SNPP satellite detections (raw NASA export)
 - `fire_archive_M-C61_734126.csv` – MODIS Aqua and MODIS Terra satellite detections (raw NASA export)
+- `victoria_boundary_fao_gaul_2015.geojson` - Precise Victoria boundary recieved from GEE script
 
-All files can be downloaded from https://firms.modaps.eosdis.nasa.gov/download. This script can work with any provided time period that the above satellite detections exist for.
+All satellite files can be downloaded from https://firms.modaps.eosdis.nasa.gov/download. This script can work with any provided time period that the above satellite detections exist for.
+
+The victoria boundary geojson can be extracted for GEE using the provided  `victoria_boundary_GEE.js`. Copy the script into the GEE script interface, run the task, and download from the Google Drive.
 
 To use the script, download the above raw NASA exports, place the downloaded data into the data folder inside `historic_fire_events_dataset`, and ensure the correct naming convention.
 
@@ -36,9 +40,9 @@ To use the script, download the above raw NASA exports, place the downloaded dat
 
 | Feature | Type | Description |
 |---------|------|-------------|
-| **cell_x** | int | Grid cell x-coordinate (meters from origin in EPSG:7855) |
-| **cell_y** | int | Grid cell y-coordinate (meters from origin in EPSG:7855) |
-| **datetime** | datetime | Precise acquisition time of detection (HHmm format) |
+| **cell_x** | int | Grid cell x-coordinate |
+| **cell_y** | int | Grid cell y-coordinate |
+| **datetime** | datetime | Precise acquisition time of detection (HHmm format) UTC |
 | **daynight** | int | 0 = day pass, 1 = night pass |
 | **satellite** | str | Source satellite: `N20` (VIIRS), `N` (VIIRS), `Terra` (MODIS), or `Aqua` (MODIS) |
 | **time_since_prev_pass** | float | Seconds elapsed since previous recorded satellite pass. Gives context to each timestep |
@@ -71,7 +75,8 @@ Applies bounding box filter (lat: -39.2 to -34.0, lon: 140.9 to 150.0) to isolat
 
 ### 3. Grid Cells
 - Projects to EPSG:7855 (GDA2020 / MGA zone 55) for meter-accurate geometry
-- Snaps detections to 1 km² cells (1000m × 1000m)
+- Snaps detections to 5 km² cells (5000m × 5000m)
+- Clips cells to only those contained within the Victoria region
 - Aggregates to the highest reading per cell per satellite pass
 - Rebuilds cell centroids and geometry in lat/lon (EPSG:4326)
 
@@ -96,9 +101,7 @@ Drops intermediate columns, enforces column ordering, and writes final dataset t
 
 | Parameter | Value | Notes |
 |-----------|-------|-------|
-| Grid cell size | 1000 m (1 km²) | Defines spatial resolution of the dataset |
-| Bounding box (lat) | -39.2 to -34.0 | Covers Victoria with small buffer |
-| Bounding box (lon) | 140.9 to 150.0 | Covers Victoria with small buffer |
+| Grid cell size | 5000 m (5 km²) | Defines spatial resolution of the dataset |
 | neighbour radius r1 | 1 cell | Immediate 8-cell neighbourhood |
 | neighbour radius r2 | 2 cells | Extended neighbourhood (24 cells) |
 
