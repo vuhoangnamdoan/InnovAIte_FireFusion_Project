@@ -2,6 +2,7 @@ from pydantic_settings import BaseSettings
 
 # gets from environment variables (case-insensitive)
 class Environment(BaseSettings):
+    db_url: str
     broker_url: str
     cache_url: str
 

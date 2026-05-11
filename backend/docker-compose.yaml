@@ -14,6 +14,7 @@ services:
     environment:
       BROKER_URL: amqp://guest:guest@broker:5672
       CACHE_URL: redis://cache:6379
+      DB_URL: postgresql://postgres:postgres@relational-db:5432/postgres
       PYTHONUNBUFFERED: 1
 
   model-api: # api
@@ -58,10 +59,10 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
     volumes:
-      # init will do 01 then 02 
-      # (create tables then seed them)
       - ./utilities/aggregator-init.sql:/docker-entrypoint-initdb.d/01-schema.sql
       - ./utilities/seed-aggregator.sql:/docker-entrypoint-initdb.d/02-seed.sql
+      - ./utilities/misinformation/misinformation-init.sql:/docker-entrypoint-initdb.d/03-schema.sql
+      - ./utilities/misinformation/misinformation-seed.sql:/docker-entrypoint-initdb.d/04-seed.sql
     ports:
       - "5432:5432"
 

@@ -3,3 +3,4 @@ websockets
 aio_pika
 python-dotenv
 redis
+psycopg

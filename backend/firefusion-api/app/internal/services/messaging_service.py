@@ -1,5 +1,4 @@
 import aio_pika
-import json
 from aio_pika.abc import AbstractRobustConnection
 from aio_pika.abc import AbstractChannel
 from ...config.config import environment

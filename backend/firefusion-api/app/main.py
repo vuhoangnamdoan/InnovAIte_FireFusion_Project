@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from app.routers import hello
+from app.routers import hello, misinformation_controller
 from app.routers import forecast
 from contextlib import asynccontextmanager
 from .internal.services.forecast_service import ForecastService
@@ -29,3 +29,4 @@ app.add_middleware(
 
 app.include_router(hello.router)
 app.include_router(forecast.router)
+app.include_router(misinformation_controller.router)
