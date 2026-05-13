@@ -25,7 +25,7 @@ SCALER_SAVE_PATH = "src/models/bushfire/checkpoints/convlstm_scaler.pkl"
 INPUT_STEPS = 60
 HORIZON = 2
 BATCH_SIZE = 8
-EPOCHS = 20
+EPOCHS = 50
 LEARNING_RATE = 0.001
 
 TRAIN_VAL_RATIO = 0.9
@@ -469,7 +469,7 @@ def main():
     
     best_val_loss = float("inf")
     best_state = None
-    patience = 5
+    patience = 10
     patience_counter = 0
     
     print(f"Training config:")
